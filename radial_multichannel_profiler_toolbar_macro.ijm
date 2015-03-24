@@ -15,8 +15,8 @@ var currentslice = 1;
 var currentframe = 1;
 
 
-var currentactivechannels = "hello space-man"
-var currentmode = "nice try zarflax";
+var currentactivechannels = ""
+var currentmode = "";
 
 Stack.getPosition(currentchannel, currentslice, currentframe);
 Stack.getDimensions(stackwidth, stackheight, stackchannels, stackslices, stackframes);
@@ -41,7 +41,27 @@ getSelectionBounds(selx, sely, selwidth, selheight);
 selxc = (selx + selx + selwidth)/2;
 selyc = (sely + sely + selheight)/2;
 
+//determine whether the selection is going clockwise (positive) or counterclockwise (negative)
+//0 = rect - always cw
+//1 = oval - always cw
+//2 = polygon - cw or ccw depending on point selection order
+//3 = freehand - cw or ccw depending on draw direction
 
+getSelectionCoordinates(xs, ys);
+
+seltype =  selectionType();
+if (seltype<3) { //if oval, rect, or polgon, convert to raster
+	run("Interpolate", "interval=1"); 
+	getSelectionCoordinates(xs, ys);
+}
+
+npoints=lengthOf(xs);
+
+direction = 0;
+for (i=0;i<npoints;i++) {
+	direction = direction + (xs[(i+1)%npoints]-xs[i])*(ys[(i+1)%npoints]+ys[i]);
+}
+direction = -1 * direction/abs(direction);
 
 
 //set up the column headers
@@ -54,11 +74,18 @@ if (! isOpen("Scores")) {
 	//if no results window then we need to ask for length
 	Dialog.create("Measure radial profile...");
 	Dialog.addNumber("Profile width (pixels):", 10);
+	Dialog.addChoice("Profile orientation:", newArray("outside to inside","inside to outside"));
 	Dialog.show();
 	var pLength = Dialog.getNumber();
+	orientation = Dialog.getChoice();
+	if (orientation == "outside to inside") {orientation = 1;} else {orientation = -1;}
+	call("ij.Prefs.set", "radialchannelprofiler.orientation", orientation);
 	
 } else {
-	//reuse length, increment id
+	//reuse length, increment id, orientation
+	//pull the last-used orientation value from imageJ's preferences or use 0 as a default
+	orientation = parseInt(call("ij.Prefs.get", "radialchannelprofiler.orientation", "1")); 
+	
 	selectWindow("Scores");
 	lines = split(getInfo(), "\n");
 	if (lines.length==1) 
@@ -79,7 +106,7 @@ run("Add Selection...");
 setColor(255, 0, 255);
 Overlay.drawString('To hide measured regions: Image->Overlay->Remove Overlay', 20, 20);
 
-//QUIT ROI MANAGER TO START
+//quit roi manager if open
 if (isOpen("ROI Manager")) {
 	selectWindow("ROI Manager");
 	run("Close");
@@ -113,10 +140,16 @@ for (i=1;i<=stackchannels;i++)	{
 	roiManager("Select", 0);
 	run("Area to Line");
 	run("Straighten...", "line=" + pLength);
+//	setBatchMode("exit & display");exit;
 	run("Select All");
 	run("Rotate 90 Degrees Left");
+	
 	run("Select All");
 	channelprofile=getProfile();
+	//reverse the profile if we're counterclockwise, so profile is always in same direction
+	if ((direction * orientation) < 0) {
+		channelprofile=Array.reverse(channelprofile);
+	}
 	//print(getInfo("window.title"));
 	close();
 	//run("Close");
