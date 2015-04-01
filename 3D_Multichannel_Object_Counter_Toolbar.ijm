@@ -1,5 +1,6 @@
 var nstains = 1;
-var initialColors = newArray('red','green','blue','yellow','magenta','orange');
+var initialColors = newArray('red','green','blue','cyan','yellow','magenta','orange','white','black');
+var initialHexes = newArray('#FF0000','#00FF00','#0000FF','#00FFFF','#FFFF00','#FF00FF','#FF9600','#FFFFFF','#000000');
 var xs = newArray();
 var ys = newArray();
 var ss = newArray();
@@ -8,16 +9,16 @@ var stains = newArray();
 var currentStain = 0;
 var nObjects = 0;
 var currentColors = Array.copy(initialColors);
+var currentHexes = Array.copy(initialHexes);
 var stainMessages = makeStainMenuArray(nstains,currentColors);
 
 var width = 25;
 var height = 25;
 var objectColor = currentColors[currentStain];
-var ghostColor = '444444';
 var lineWidth = 1;
 setLineWidth(1);
 
-var onionlayers = 1;
+var onionlayers = 3;
 var onionskin = true;
 
 var tabletitle = 'Stained Objects';
@@ -48,6 +49,12 @@ function removeElementByIndex(array, i) {
 	}
 	return new;
 }
+
+function index(a, value) { //get an element's index by value, (first occurrence), otherwise -1
+      for (i=0; i<a.length; i++)
+          if (a[i]==value) return i;
+      return -1;
+} 
 
 function getTableEntry(table,row,column) {
 	selectWindow(table);
@@ -82,6 +89,9 @@ function addObject(x,y,s,f) {
 	newStains = newArray(nstains);
 	newStains = Array.fill(newStains,0);
 	stains = Array.concat(stains,newStains);
+	if (onionskin==true) {
+			drawOnionSkins(xs.length-1);	
+	}
 }
 
 function clickedObject(x,y,z) {
@@ -120,8 +130,8 @@ function inCircleUVPQ(ux,uy,vx,vy,px,py,qx,qy) {
 }
 
 
-function drawObject(x, y, width, height, slice, frame) {
-	setColor(objectColor);
+function drawObject(x, y, width, height, slice, frame, color) {
+	setColor(color);
    	Overlay.drawEllipse(x-width/2, y-height/2, width, height);
    	if (Stack.isHyperstack==true) {
    		Overlay.setPosition(0,slice,frame);
@@ -133,8 +143,8 @@ function drawObject(x, y, width, height, slice, frame) {
    	
 }
 
-function drawFill(x, y, width, height, slice, frame) {
-	setColor(objectColor);
+function drawFill(x, y, width, height, slice, frame, color) {
+	setColor(color);
    	setLineWidth((width+height)/4+1);
    	Overlay.drawEllipse(x-width/4, y-height/4, width/2, height/2);
    	if (Stack.isHyperstack==true) {
@@ -171,23 +181,75 @@ function getScore(object,stain) {
 	return stains[(object*nstains)+stain];
 }
 
+function namedColorToHex(string) {
+	i = index(initialColors,string);
+	if (i == -1) {return "#FFFFFF";print("error: unrecognized color name, substituted white")}
+	else {
+		return initialHexes[i];
+	}
+}
+
+function hexPad(n) {
+    n = toString(n);
+    if(lengthOf(n)==1) n = "0"+n;
+    return n;
+}
+
+function getOnionSkinColors() {
+	if (startsWith(objectColor,"#")) {
+		color = substring(objectColor,1);
+	}
+	else {
+		color = substring(namedColorToHex(objectColor),1);
+	}
+	alphaHexes = newArray();
+	for (i=1;i<=onionlayers;i++) {
+		alphaHexes = Array.concat(alphaHexes,"#" + hexPad(toHex(256/(pow(2, i)))) + color);
+	}
+	return alphaHexes;
+}
+
 function redrawObjects() {
 	Overlay.remove();
-	//Overlay.clear();
 	nObjects=xs.length;
 	for (i=0;i<nObjects;i++) {
-		drawObject(xs[i], ys[i], width, height, (ss[i]), fs[i]);
-		//print(ss[i]+1);
+		drawObject(xs[i], ys[i], width, height, (ss[i]), fs[i], objectColor);
 	}
-	//Overlay.show();
-	//setBatchMode(true);
 	for (i=0;i<nObjects;i++) {
 			if (getScore(i,currentStain)==1) {
-			drawFill(xs[i], ys[i], width, height, (ss[i]), fs[i]);
+			drawFill(xs[i], ys[i], width, height, (ss[i]), fs[i], objectColor);
 		}
 	}
-	//setBatchMode(false);
+	
 	Overlay.show();
+	if (onionskin==true) {
+		for (i=0;i<nObjects;i++) {
+			drawOnionSkins(i);
+		}	
+	}
+}
+
+function drawOnionSkins(object) {
+		onionSkinColors = getOnionSkinColors();
+		Stack.getDimensions(imagewidth, imageheight, nchannels, nslices, nframes);
+		
+			for (j=1;j<=onionlayers;j++) {
+				if (ss[object]-j>0) {
+					if (getScore(object,currentStain)==1) {
+						drawFill(xs[object], ys[object], (width/pow(2,j))+1, (height/pow(2,j))+1, (ss[object]-j), fs[object], onionSkinColors[j-1]);
+					} else {
+						drawObject(xs[object], ys[object], width/pow(2,j), height/pow(2,j), (ss[object]-j), fs[object], onionSkinColors[j-1]);
+					}
+				}
+				if (ss[object]+j<=nslices) {
+					if (getScore(object,currentStain)==1) {
+						drawFill(xs[object], ys[object], (width/pow(2,j))+1, (height/pow(2,j))+1, (ss[object]+j), fs[object], onionSkinColors[j-1]);
+					} else {
+						drawObject(xs[object], ys[object], width/pow(2,j), height/pow(2,j), (ss[object]+j), fs[object], onionSkinColors[j-1]);
+					}	
+				}
+			}
+		
 }
 
 function makeStainMenuArray(nstains,colors) {
@@ -201,7 +263,7 @@ function makeStainMenuArray(nstains,colors) {
 macro "Add Object Tool - T3b16+" {
    Stack.getPosition(channel, slice, frame);
    getCursorLoc(x, y, z, flags);
-   drawObject(x, y, width, height, slice, frame);
+   drawObject(x, y, width, height, slice, frame, objectColor);
    addObject(x,y,slice,frame);
    nObjects=xs.length;
 }
@@ -229,7 +291,10 @@ macro "Scorer Tool - Cf55H241777702200C000O00ffO11dd" {
 	if (clicked != -1) {
 		if (getScore(clicked,currentStain)==0) {
 			setScore(clicked,currentStain,1);
-			drawFill(xs[clicked], ys[clicked], width, height, (ss[clicked]), frame);
+			drawFill(xs[clicked], ys[clicked], width, height, (ss[clicked]), frame, objectColor);
+			if (onionskin == true) {
+			drawOnionSkins(clicked);
+			}
 		} else {
 			setScore(clicked,currentStain,0);
 			redrawObjects();
@@ -247,7 +312,7 @@ macro "Cycle Through Stains Action Tool - T2f20>" {
 	redrawObjects();
 }
 
-macro "Set Number of Stains Action Tool - T2f20n" {
+macro "Configuration Action Tool - T2f20~" {
 	 Dialog.create("Number of Stains...");
 	 Dialog.addNumber("Number of Stains...", nstains);
 	 Dialog.addMessage("Warning! Changing this will delete current data.")
@@ -257,13 +322,6 @@ macro "Set Number of Stains Action Tool - T2f20n" {
 	 deleteAll();
 	 
 	 //reset the stain menu
-}
-
-
-macro "Scorer Settings Action Tool - T2f24~" {
-	 Dialog.create("Object Counter Settings...");
-	 
-	 Dialog.show();
 }
 
 macro "Data Table Action Tool - T3f20#" {
@@ -291,3 +349,16 @@ macro "Data Table Action Tool - T3f20#" {
 macro "Delete All Action Tool - Cf00O00ffO11ddH1221edde" {
 	deleteAll();
 }
+
+
+//To Do
+//-------------
+//Save and Load
+//Count totaling
+//Onion skinning
+//Options: Colors, thickness, onion-skinning depth,
+//Options: consolidate dimensions and general options
+//Options: non-destructive dimensional addition/contraction
+//Autocounting
+//Autoscoring
+//Button: Toggle onion skinning
