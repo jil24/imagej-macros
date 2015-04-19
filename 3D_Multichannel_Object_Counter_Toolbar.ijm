@@ -12,6 +12,15 @@ var currentColors = Array.copy(initialColors);
 var currentHexes = Array.copy(initialHexes);
 var stainMessages = makeStainMenuArray(nstains,currentColors);
 
+//flags for mouse clicks
+var shift=1;
+var ctrl=2; 
+var rightButton=4;
+var alt=8;
+var leftButton=16;
+var insideROI = 32; // requires 1.42i or later
+
+
 var width = 25;
 var height = 25;
 var objectColor = currentColors[currentStain];
@@ -23,6 +32,13 @@ var onionskin = true;
 
 var tabletitle = 'Stained Objects';
 var columntitles = "\\Headings:ObjectID\tx\t\y\t\z";
+
+//values for DoG spot detector
+	//sigma1 = 1 / (1 + √2 ) × d
+	//sigma2 = sqrt(2) × sigma1
+
+var dExp = 20;
+var qvalCutoff = 1;
 
 //can't beleive this isn't built in
 //http://imagej.1557.x6.nabble.com/macro-tip-for-fast-concatenation-of-strings-td3695693.html
@@ -94,7 +110,7 @@ function addObject(x,y,s,f) {
 	}
 }
 
-function clickedObject(x,y,z) {
+function clickedObject(x,y) {
 	Stack.getPosition(channel, slice, frame);
 	diameter = (height+width)/2;
 	res = -1;
@@ -133,10 +149,10 @@ function inCircleUVPQ(ux,uy,vx,vy,px,py,qx,qy) {
 function drawObject(x, y, width, height, slice, frame, color) {
 	setColor(color);
    	Overlay.drawEllipse(x-width/2, y-height/2, width, height);
-   	if (Stack.isHyperstack==true) {
+   	if (Stack.isHyperstack==true) { // using this format fails if not a hyperstack
    		Overlay.setPosition(0,slice,frame);
    	} else {
-   		Overlay.setPosition(slice);
+   		Overlay.setPosition(slice); // this fails if it's a hyperstack... dumb.
    	}
    	Overlay.show();
 
@@ -260,18 +276,221 @@ function makeStainMenuArray(nstains,colors) {
 	return name;
 }
 
-macro "Add Object Tool - T3b16+" {
+
+
+
+// functions for the scorer menu button
+
+function dataTable() {
+	newcolumntitles = columntitles;
+	for (i=1;i<=nstains;i++) {
+		newcolumntitles = newcolumntitles+"\tstain"+i;
+	}
+	if (isOpen(tabletitle)) {
+		selectWindow(tabletitle);
+		run("Close");
+	} 	
+	run("New... ", "name=["+ tabletitle +"] type=Table");
+	print("[" + tabletitle + "]", newcolumntitles);
+	
+	for (i=0;i<nObjects;i++) {
+		datastring = "" + (i+1) + "\t" + xs[i] + "\t" + ys[i] + "\t" + ss[i];
+		for (j=0;j<nstains;j++) {
+			datastring = datastring+ "\t" +stains[(nstains*i)+j];
+		}
+		print("[" + tabletitle + "]",datastring);
+	}
+}
+
+function configurationWindow() {
+	 Dialog.create("Number of Stains...");
+	 Dialog.addNumber("Number of Stains...", nstains);
+	 Dialog.addMessage("Warning! Changing this will delete current data.")
+	 Dialog.show();
+	 nstains = Dialog.getNumber();
+	 stainMessages = makeStainMenuArray(nstains,currentColors);
+	 deleteAll();
+	 
+	 //reset the stain menu
+}
+
+function spotDetector() {
+	Stack.getPosition(channel, slice, frame);
+	im = getImageID(); // this should be changed when the script becomes aware of multiple images
+
+	final = false;
+
+	while (final == false) {
+		Dialog.create("Spot Detector");
+		Dialog.addSlider("Spot Size...", 1, 50, dExp);
+		Dialog.addSlider("Spot Quality Cutoff...", 0.01, 1.99, qvalCutoff);
+		Dialog.addCheckbox("Finalize Settings:", false);
+		Dialog.show();
+
+		dExp = Dialog.getNumber();
+		qvalCutoff = Dialog.getNumber();
+		final = Dialog.getCheckbox();
+
+		setBatchMode(true);
+		
+
+		rExp = dExp/2;
+	
+		sigma1 = (1/(1+sqrt(2))*dExp);
+		sigma2 = sqrt(2)*sigma1;
+
+		Overlay.clear;
+		run("Duplicate...", "title=sigma1");
+		run("32-bit");
+		run("Gaussian Blur...", "sigma=" + sigma1);
+		
+		selectImage(im);
+		
+		run("Duplicate...", "title=sigma2");
+		run("32-bit");
+		run("Gaussian Blur...", "sigma=" + sigma2);
+		
+		
+		imageCalculator("Subtract create 32-bit", "sigma1","sigma2");
+		
+		selectWindow("sigma1");
+		close();
+		selectWindow("sigma2");
+		close();
+		
+		selectWindow("Result of sigma1");
+		run("Find Maxima...", "noise=0 output=[Point Selection]");
+		
+		getSelectionCoordinates(xpoints, ypoints);
+		run("Select None");
+		
+		nspots = xpoints.length;
+		
+		sigma1values = newArray(nspots);
+		sigma2values = newArray(nspots);
+		qval = newArray(nspots);
+		
+		for (i=0;i<nspots;i++) {
+			 makeOval(xpoints[i]-sigma1/2, ypoints[i]-sigma1/2, sigma1, sigma1);
+			 getStatistics(area, mean);
+			 sigma1values[i] = area * mean;
+			 
+			 makeOval(xpoints[i]-sigma2/2, ypoints[i]-sigma2/2, sigma2, sigma2);
+			 getStatistics(area, mean);
+			 sigma2values[i] = (area * mean)-sigma1values[i];
+		
+			 qval[i] = sigma1values[i]/sigma2values[i];
+		
+			 run("Select None");
+		}
+		
+		close();
+		selectImage(im);
+		
+		deletelist = newArray();
+		
+		for (i=0;i<nspots;i++) {
+			for (j=i+1;j<nspots;j++) {
+				if(i!=j && inCircleCenterDiameter(xpoints[i],ypoints[i],dExp,xpoints[j],ypoints[j])){
+					if (qval[i]>qval[j]){
+						deletelist = Array.concat(deletelist,j);
+					} else {
+						deletelist = Array.concat(deletelist,i);
+					}
+				}
+			}
+		}
+		
+		for (i=0;i<deletelist.length;i++) {
+			xpoints = removeElementByIndex(xpoints, deletelist[i]);
+			ypoints = removeElementByIndex(ypoints, deletelist[i]);
+			qval = removeElementByIndex(qval, deletelist[i]);
+		}
+		
+		nspots = xpoints.length;
+		
+		for (i=0;i<nspots;i++) {
+				if (qval[i]>qvalCutoff) {
+			 	drawObject(xpoints[i], ypoints[i], dExp, dExp, slice, frame, objectColor);
+			 }
+		}	
+		Overlay.show;
+		setBatchMode("exit and display");
+	}
+
+	
+	for (i=0;i<nspots;i++) {
+			if (qval[i]>qvalCutoff) {
+				addObject(xpoints[i], ypoints[i], slice, frame);
+		}
+	}
+	redrawObjects();
+}
+
+
+
+
+
+
+
+
+
+macro "Add Object Tool (shift drag moves / shift right drag changes slice) - T3b16+" {
    Stack.getPosition(channel, slice, frame);
+   Stack.getDimensions(imagewidth, imageheight, nchannels, nslices, nframes);
    getCursorLoc(x, y, z, flags);
-   drawObject(x, y, width, height, slice, frame, objectColor);
-   addObject(x,y,slice,frame);
-   nObjects=xs.length;
+   //print(flags);
+   if (flags&shift!=0) {
+   	 clicked = clickedObject(x,y);
+   	 if (clicked != -1) {
+   	   while (flags != 0) {
+   	   	 getCursorLoc(x,y,z,flags);
+   	   	 xs[clicked] = x;
+   	     ys[clicked] = y;
+   	     redrawObjects();
+   	     wait(25);
+   	   }
+   	 }
+   } else if (flags&rightButton!=0) {
+   	//print("bleh");
+   	 clicked = clickedObject(x,y);
+   	 if (clicked != -1) {
+   	 	ox = x;
+   	 	oslice = slice;
+   	   while (flags != 0) {
+   	   	 getCursorLoc(x,y,z,flags);
+   	   	 toslice = oslice+floor((x-ox)/15);
+   	   	 //print(toslice);
+   	   	 if (toslice > nslices) {
+   	   	 	toslice = nslices;
+   	   	 }
+   	   	 if (toslice < 1) {
+   	   	 	toslice = 1;
+   	   	 }
+   	   	 ss[clicked] = toslice;
+		 Stack.setPosition(channel,toslice,frame);
+   	     redrawObjects();
+   	     wait(100);
+   	   }
+   	   
+   	 }
+   }
+   else {
+   	 drawObject(x, y, width, height, slice, frame, objectColor);
+   	 addObject(x,y,slice,frame);
+   	 nObjects=xs.length;
+   }
+}
+
+macro "Add Object Tool (shift drag moves / shift right drag changes slice) Selected" {
+	setOption("DisablePopupMenu", true); //kludge
+	redrawObjects();
 }
 
 macro "Remove Object Tool - T3b16x" {
 	getCursorLoc(x, y, z, flags);
 	nObjects=xs.length;
-	clicked = clickedObject(x,y,z);
+	clicked = clickedObject(x,y);
 	if (clicked != -1) {
 		Overlay.removeSelection(clicked);
 		xs = removeElementByIndex(xs, clicked);
@@ -280,6 +499,7 @@ macro "Remove Object Tool - T3b16x" {
 		for (j=0;j<nstains;j++) {
 			stains = removeElementByIndex(stains, (nstains*clicked));
 		}
+	nObjects=xs.length;
 	}
 }
 
@@ -287,7 +507,7 @@ macro "Scorer Tool - Cf55H241777702200C000O00ffO11dd" {
 	Stack.getPosition(channel, slice, frame);
 	getCursorLoc(x, y, z, flags);
 	nObjects=xs.length;
-	clicked = clickedObject(x,y,z);
+	clicked = clickedObject(x,y);
 	if (clicked != -1) {
 		if (getScore(clicked,currentStain)==0) {
 			setScore(clicked,currentStain,1);
@@ -312,53 +532,46 @@ macro "Cycle Through Stains Action Tool - T2f20>" {
 	redrawObjects();
 }
 
-macro "Configuration Action Tool - T2f20~" {
-	 Dialog.create("Number of Stains...");
-	 Dialog.addNumber("Number of Stains...", nstains);
-	 Dialog.addMessage("Warning! Changing this will delete current data.")
-	 Dialog.show();
-	 nstains = Dialog.getNumber();
-	 stainMessages = makeStainMenuArray(nstains,currentColors);
-	 deleteAll();
-	 
-	 //reset the stain menu
-}
+var menu = newMenu("Scorer Menu Tool", newArray("Data Table","Configuration","","Spot Detector","","Delete All"));
 
-macro "Data Table Action Tool - T3f20#" {
-	newcolumntitles = columntitles;
-	for (i=1;i<=nstains;i++) {
-		newcolumntitles = newcolumntitles+"\tstain"+i;
+macro "Scorer Menu Tool - T2f20#" {
+	cmd = getArgument();
+	if (cmd == "Data Table") {
+		dataTable();
 	}
-	if (isOpen(tabletitle)) {
-		selectWindow(tabletitle);
-		run("Close");
-	} 	
-	run("New... ", "name=["+ tabletitle +"] type=Table");
-	print("[" + tabletitle + "]", newcolumntitles);
-	
-	for (i=0;i<nObjects;i++) {
-		datastring = "" + (i+1) + "\t" + xs[i] + "\t" + ys[i] + "\t" + ss[i];
-		for (j=0;j<nstains;j++) {
-			datastring = datastring+ "\t" +stains[(nstains*i)+j];
-		}
-		print("[" + tabletitle + "]",datastring);
+	if (cmd == "Configuration") {
+		configurationWindow();
+	}
+	if (cmd == "Spot Detector") {
+		spotDetector();
+	}
+	if (cmd == "Delete All") {
+		sure = getBoolean("Really delete everything?");
+		if (sure == true) {deleteAll();}
 	}
 }
 
-
-macro "Delete All Action Tool - Cf00O00ffO11ddH1221edde" {
-	deleteAll();
-}
+//macro "Delete All Action Tool - Cf00O00ffO11ddH1221edde" {
+//	deleteAll();
+//}
 
 
 //To Do
 //-------------
 //Save and Load
+//mutliptle image window handling
 //Count totaling
 //Onion skinning
-//Options: Colors, thickness, onion-skinning depth,
-//Options: consolidate dimensions and general options
+//Options: General options (name stains, specify colors, specify thickness, dot size, dot shape, onionskin thickness)
 //Options: non-destructive dimensional addition/contraction
 //Autocounting
 //Autoscoring
-//Button: Toggle onion skinning
+//Menu: Gear
+//1: Load...
+//2: Save
+//3: Save As...
+//4:--
+//5: Toggle onion skinning
+//6:--
+//7: Options: General options (name stains, specify colors, specify thickness, dot size, dot shape, onionskin thickness)
+//8: Options: non-destructive dimensional addition/contraction
