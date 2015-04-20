@@ -66,11 +66,40 @@ function removeElementByIndex(array, i) {
 	return new;
 }
 
+
+
 function index(a, value) { //get an element's index by value, (first occurrence), otherwise -1
       for (i=0; i<a.length; i++)
           if (a[i]==value) return i;
       return -1;
 } 
+
+function arrayMean(array) {
+	Array.getStatistics(array, min, max, mean, stdDev);
+	return mean;
+}
+function arrayMax(array) {
+	Array.getStatistics(array, min, max, mean, stdDev);
+	return max;
+}
+function arrayMin(array) {
+	Array.getStatistics(array, min, max, mean, stdDev);
+	return min;
+}
+
+function removeElementByBinaryArray(array, binaryArray) {
+	narray = array.length;
+	mean = arrayMean(binaryArray);
+	ntodelete = narray * mean;
+	newlength = narray - ntodelete;
+	new = newArray(newlength);
+
+	j=0;
+	for (i=0;i<narray;i++){
+		if (binaryArray[i] == 0) {new[j] = array[i];j++;}	
+	}
+	return new;
+}
 
 function getTableEntry(table,row,column) {
 	selectWindow(table);
@@ -306,10 +335,33 @@ function configurationWindow() {
 	 Dialog.create("Number of Stains...");
 	 Dialog.addNumber("Number of Stains...", nstains);
 	 Dialog.addMessage("Warning! Changing this will delete current data.")
+
+	 Dialog.addMessage("Display Settings:");
+	 Dialog.addNumber("Object diameter:", width);
+	 Dialog.addNumber("Outline width:", lineWidth);
+	  Dialog.addCheckbox("Draw onion skins:", onionskin);
+	  Dialog.addNumber("Number of slices to draw onion skins:", onionlayers);
 	 Dialog.show();
+
+	 
 	 nstains = Dialog.getNumber();
+	 
+	 width = Dialog.getNumber();
+	 height = width;
+	 lineWidth = Dialog.getNumber();
+	 setLineWidth(lineWidth);
+	
+	onionskin = Dialog.getCheckbox();
+	onionlayers = Dialog.getNumber();
+	 
 	 stainMessages = makeStainMenuArray(nstains,currentColors);
 	 deleteAll();
+
+	 
+	
+
+
+
 	 
 	 //reset the stain menu
 }
@@ -332,7 +384,13 @@ function spotDetector() {
 		final = Dialog.getCheckbox();
 
 		setBatchMode(true);
-		
+		useselection = 0;
+		if (selectionType() != -1) {
+			useselection = 1;
+			run("Create Mask");
+			selectImage(im);
+			run("Select None");
+		}
 
 		rExp = dExp/2;
 	
@@ -357,14 +415,38 @@ function spotDetector() {
 		close();
 		selectWindow("sigma2");
 		close();
+
+		if (useselection == 1) {
+			selectImage("Mask");
+			run("Create Selection");
+			selectWindow("Result of sigma1");
+			run("Restore Selection");
+		} else {
+			selectWindow("Result of sigma1");
+		}
 		
-		selectWindow("Result of sigma1");
+		
+		run("Min...", "value=0");
 		run("Find Maxima...", "noise=0 output=[Point Selection]");
 		
 		getSelectionCoordinates(xpoints, ypoints);
 		run("Select None");
+		close();
 		
+
+
 		nspots = xpoints.length;
+		 showStatus("" + nspots + " blobs detected, filtering...");
+		
+		//sort by x coordinate
+		indices = Array.rankPositions(xpoints);
+		xpoints = Array.sort(xpoints);
+		
+		sortedypoints = newArray(nspots);
+		for (i=0;i<nspots;i++) {
+			sortedypoints[i] = ypoints[indices[i]];
+		}
+		ypoints = sortedypoints;
 		
 		sigma1values = newArray(nspots);
 		sigma2values = newArray(nspots);
@@ -374,49 +456,90 @@ function spotDetector() {
 			 makeOval(xpoints[i]-sigma1/2, ypoints[i]-sigma1/2, sigma1, sigma1);
 			 getStatistics(area, mean);
 			 sigma1values[i] = area * mean;
+			 s1area = area;
 			 
 			 makeOval(xpoints[i]-sigma2/2, ypoints[i]-sigma2/2, sigma2, sigma2);
 			 getStatistics(area, mean);
 			 sigma2values[i] = (area * mean)-sigma1values[i];
-		
-			 qval[i] = sigma1values[i]/sigma2values[i];
+
+			sigma1values[i] = sigma1values[i] / s1area;
+			sigma2values[i] = sigma2values[i] / (area - s1area);
+			qval[i] = (sigma1values[i]-sigma2values[i])*sigma1values[i];
 		
 			 run("Select None");
 		}
+
 		
-		close();
-		selectImage(im);
-		
-		deletelist = newArray();
+
+		qvmax = arrayMax(qval);
+		deletelist = newArray(nspots);
 		
 		for (i=0;i<nspots;i++) {
+			showStatus("Quality filtering... "+i+"/"+nspots);
+			qval[i] = qval[i]/qvmax;
+			deletelist[i] = (qval[i]<=qvalCutoff);
+		}
+
+		if (arrayMean(deletelist)>0) {
+			xpoints = removeElementByBinaryArray(xpoints,deletelist);
+			ypoints = removeElementByBinaryArray(ypoints,deletelist);
+			qval = removeElementByBinaryArray(qval,deletelist);
+			
+		}
+		nspots = xpoints.length;
+
+
+		//make a new deletelist
+		deletelist = newArray(nspots);
+		Array.fill(deletelist,0);
+
+		showStatus("" + nspots + " blobs after quality filtering. detecting overlapping blobs...");
+
+		if (useselection == 1) {
+			selectImage("Mask");
+			run("Create Selection");
+			close();
+			selectImage(im);
+			run("Restore Selection");
+		} else {
+			selectImage(im);
+		}
+		
+		setBatchMode("exit and display");
+		
+		for (i=0;i<nspots;i++) {
+			showStatus("Detecting overlapping blobs: "+i+"/"+nspots);
+			drawObject(xpoints[i], ypoints[i], dExp, dExp, slice, frame, objectColor);
+			Overlay.show;
 			for (j=i+1;j<nspots;j++) {
-				if(i!=j && inCircleCenterDiameter(xpoints[i],ypoints[i],dExp,xpoints[j],ypoints[j])){
-					if (qval[i]>qval[j]){
-						deletelist = Array.concat(deletelist,j);
-					} else {
-						deletelist = Array.concat(deletelist,i);
+				if(i!=j && abs(xpoints[i]-xpoints[j]) < dExp && abs(ypoints[i]-ypoints[j]) < dExp){
+					if (inCircleCenterDiameter(xpoints[i],ypoints[i],dExp,xpoints[j],ypoints[j])){
+						if (qval[i]>qval[j] && deletelist[i] != 1){
+							deletelist[j] = 1;
+						} else if (deletelist[j] != 1) {
+							deletelist[i] = 1;
+							j = nspots; // bail out to i loop
+						}
 					}
+				} else if (xpoints[j]-xpoints[i] >= dExp) {
+					//since we're x-sorted, if we've passed the x-distance, we're good - move on.
+					j = nspots; // bail out to i loop
 				}
 			}
 		}
-		
-		for (i=0;i<deletelist.length;i++) {
-			xpoints = removeElementByIndex(xpoints, deletelist[i]);
-			ypoints = removeElementByIndex(ypoints, deletelist[i]);
-			qval = removeElementByIndex(qval, deletelist[i]);
+
+		if (arrayMean(deletelist)>0) {
+			xpoints = removeElementByBinaryArray(xpoints,deletelist);
+			ypoints = removeElementByBinaryArray(ypoints,deletelist);
+			qval = removeElementByBinaryArray(qval,deletelist);
+			
 		}
 		
 		nspots = xpoints.length;
 		
-		for (i=0;i<nspots;i++) {
-				if (qval[i]>qvalCutoff) {
-			 	drawObject(xpoints[i], ypoints[i], dExp, dExp, slice, frame, objectColor);
-			 }
-		}	
-		Overlay.show;
-		setBatchMode("exit and display");
 	}
+
+	setBatchMode("exit and display");
 
 	
 	for (i=0;i<nspots;i++) {
@@ -428,7 +551,7 @@ function spotDetector() {
 }
 
 
-
+}
 
 
 
