@@ -38,7 +38,7 @@ var columntitles = "\\Headings:ObjectID\tx\t\y\t\z";
 	//sigma2 = sqrt(2) × sigma1
 
 var dExp = 20;
-var qvalCutoff = 1;
+var qvalCutoff = 0.05;
 
 //can't beleive this isn't built in
 //http://imagej.1557.x6.nabble.com/macro-tip-for-fast-concatenation-of-strings-td3695693.html
@@ -92,7 +92,7 @@ function removeElementByBinaryArray(array, binaryArray) {
 	mean = arrayMean(binaryArray);
 	ntodelete = narray * mean;
 	newlength = narray - ntodelete;
-	new = newArray(newlength);
+	new = newArray(round(newlength)); //if we don't round, sometimes there are floating point errors
 
 	j=0;
 	for (i=0;i<narray;i++){
@@ -426,7 +426,12 @@ function spotDetector() {
 		}
 		
 		
-		run("Min...", "value=0");
+		//run("Min...", "value=0");
+
+		//debug...
+		//setBatchMode("exit and display");
+		//exit;
+		
 		run("Find Maxima...", "noise=0 output=[Point Selection]");
 		
 		getSelectionCoordinates(xpoints, ypoints);
@@ -451,15 +456,19 @@ function spotDetector() {
 		sigma1values = newArray(nspots);
 		sigma2values = newArray(nspots);
 		qval = newArray(nspots);
+
+
+		
 		
 		for (i=0;i<nspots;i++) {
-			 makeOval(xpoints[i]-sigma1/2, ypoints[i]-sigma1/2, sigma1, sigma1);
+			 makeOval(xpoints[i]-sigma1/2, ypoints[i]-sigma1/2, round(sigma1), round(sigma1));
 			 getStatistics(area, mean);
 			 sigma1values[i] = area * mean;
 			 s1area = area;
 			 
-			 makeOval(xpoints[i]-sigma2/2, ypoints[i]-sigma2/2, sigma2, sigma2);
+			 makeOval(xpoints[i]-sigma2/2, ypoints[i]-sigma2/2, round(sigma2), round(sigma2));
 			 getStatistics(area, mean);
+
 			 sigma2values[i] = (area * mean)-sigma1values[i];
 
 			sigma1values[i] = sigma1values[i] / s1area;
@@ -479,6 +488,11 @@ function spotDetector() {
 			qval[i] = qval[i]/qvmax;
 			deletelist[i] = (qval[i]<=qvalCutoff);
 		}
+
+		//debug
+		//Array.print(sigma1values);
+		//Array.print(sigma2values);
+		//Array.print(qval);
 
 		if (arrayMean(deletelist)>0) {
 			xpoints = removeElementByBinaryArray(xpoints,deletelist);
@@ -539,7 +553,7 @@ function spotDetector() {
 		
 	}
 
-	setBatchMode("exit and display");
+	//setBatchMode("exit and display");
 
 	
 	for (i=0;i<nspots;i++) {
