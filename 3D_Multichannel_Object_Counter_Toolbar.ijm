@@ -40,6 +40,10 @@ var columntitles = "\\Headings:ObjectID\tx\t\y\t\z";
 var dExp = 20;
 var qvalCutoff = 0.05;
 
+//values for speeding up object dragging operations
+
+var lastClicked = -1;
+
 //can't beleive this isn't built in
 //http://imagej.1557.x6.nabble.com/macro-tip-for-fast-concatenation-of-strings-td3695693.html
 function joinArray(array,sep) {
@@ -143,6 +147,14 @@ function clickedObject(x,y) {
 	Stack.getPosition(channel, slice, frame);
 	diameter = (height+width)/2;
 	res = -1;
+
+	//speedup for dragging - test the object that was last clicked first
+	if (lastClicked != -1 && lastClicked < nObjects) {
+		if (slice == ss[lastClicked] && inCircleCenterDiameter(xs[lastClicked],ys[lastClicked],diameter,x,y)) {
+			return lastClicked;
+		}
+	}
+	
 	for (i=nObjects-1;i>=0;i--) {
    		if(slice == ss[i] && inCircleCenterDiameter(xs[i],ys[i],diameter,x,y)) {
 			//bailout, so we only identify the 'topmost'
@@ -434,7 +446,12 @@ function spotDetector() {
 		
 		run("Find Maxima...", "noise=0 output=[Point Selection]");
 		
-		getSelectionCoordinates(xpoints, ypoints);
+		if (selectionType != -1 ) {
+			getSelectionCoordinates(xpoints, ypoints);
+		} else {
+		xpoints=newArray();
+		ypoints=newArray();
+		}
 		run("Select None");
 		close();
 		
@@ -550,6 +567,9 @@ function spotDetector() {
 		}
 		
 		nspots = xpoints.length;
+		setColor(objectColor);
+		Overlay.drawString("Detected Spots Preview:", 2, 14);
+		Overlay.show;
 		
 	}
 
@@ -572,15 +592,15 @@ function spotDetector() {
 
 
 
-macro "Add Object Tool (shift drag moves / shift right drag changes slice) - T3b16+" {
+macro "Add Object Tool (shift drag moves / shift alt drag changes slice) - T3b16+" {
    Stack.getPosition(channel, slice, frame);
    Stack.getDimensions(imagewidth, imageheight, nchannels, nslices, nframes);
    getCursorLoc(x, y, z, flags);
    //print(flags);
-   if (flags&shift!=0) {
+   if (flags == shift|leftButton ) {
    	 clicked = clickedObject(x,y);
    	 if (clicked != -1) {
-   	   while (flags != 0) {
+   	   while (flags&leftButton != 0) {
    	   	 getCursorLoc(x,y,z,flags);
    	   	 xs[clicked] = x;
    	     ys[clicked] = y;
@@ -588,13 +608,13 @@ macro "Add Object Tool (shift drag moves / shift right drag changes slice) - T3b
    	     wait(25);
    	   }
    	 }
-   } else if (flags&rightButton!=0) {
+   } else if (flags == shift|alt|leftButton) {
    	//print("bleh");
    	 clicked = clickedObject(x,y);
    	 if (clicked != -1) {
    	 	ox = x;
    	 	oslice = slice;
-   	   while (flags != 0) {
+   	   while (flags&leftButton != 0) {
    	   	 getCursorLoc(x,y,z,flags);
    	   	 toslice = oslice+floor((x-ox)/15);
    	   	 //print(toslice);
@@ -619,8 +639,9 @@ macro "Add Object Tool (shift drag moves / shift right drag changes slice) - T3b
    }
 }
 
-macro "Add Object Tool (shift drag moves / shift right drag changes slice) Selected" {
-	setOption("DisablePopupMenu", true); //kludge
+macro "Add Object Tool (shift drag moves / shift alt drag changes slice) Selected" {
+	//setOption("DisablePopupMenu", true); //kludge
+	Overlay.remove;
 	redrawObjects();
 }
 
