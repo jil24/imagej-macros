@@ -1,4 +1,5 @@
 //Alpha_Shape.ijm
+//version 1.03a 20191030 - fixed variable type issue for new version of Imagej.
 //version 1.03 20140831 - added progress indicators to status bar.
 //version 1.02 20140713 - fixed bug that always included the first point on the left in an alpha shape
 //also made alpha scaled to the current image's scale
@@ -260,9 +261,14 @@ function addTri(trianglearray,j,k,l) {
 	return trianglearray;
 }
 
+
+var arraystartvalue = newArray();
+arraystartvalue = Array.concat(arraystartvalue,-1);
+
 function updatetrineighbors(tri, start) {
-	//when initially invoking updatetrineighbors, start should = 1 otherwise for recursion it has a list of already touched triangles
-	if (start==1) {
+	//when initially invoking updatetrineighbors, start should = -1 in 1st position otherwise for recursion it has a list of already touched triangles
+	print(start[0]);
+	if (start[0] == -1) {
 		alreadycalculated=newArray();
 	} else {
 		alreadycalculated=start;	
@@ -279,12 +285,14 @@ function updatetrineighbors(tri, start) {
 			neighborneighbors = Array.slice(tris,trineighbors[s]*6+3,trineighbors[s]*6+6);
 			if (index(neighborneighbors,tri/6) == -1) {
 //				print("I am triangle " + tri/6 + " and neighbor " + trineighbors[s] + " should include me - includes:");
-//				Array.print(neighborneighbors);
+				Array.print(alreadycalculated);
+				print("beginning recursion");
 				updatetrineighbors(trineighbors[s], alreadycalculated); //recursion time
 			}
 //			Array.print(neighborneighbors);
 		}
 	}
+print("made it through once");
 }
 
 function getotherpoint(tri,u,v) {
@@ -381,7 +389,7 @@ function edgeflipifnotld (u,v) {
 			}
 		}
 		//regenerate neighbor data
-		updatetrineighbors(tristoreplace[0], 1);
+		updatetrineighbors(tristoreplace[0], arraystartvalue);
 
 		//make a list neighboring edges to possibly add to the edgestack
 		sortedup = newArray(u,p); sortedup = Array.sort(sortedup); 
@@ -518,7 +526,7 @@ for (p=3;p<n;p++) {
 		makeborderpolyconvex(p);		
 //		Array.print(borderpoly);
 		regeneratebordermidpoints();
-		updatetrineighbors(tris.length/6-1,1); //start a triangle update from the last triangle made
+		updatetrineighbors(tris.length/6-1,arraystartvalue); //start a triangle update from the last triangle made
 		nedgestoldtest = edgestoldtest.length;
 		for (i=0;i<nedgestoldtest;i=i+2) {
 			j=trisborderingedge(edgestoldtest[i],edgestoldtest[i+1]);
